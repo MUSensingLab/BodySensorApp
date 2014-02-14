@@ -30,6 +30,7 @@ import org.apache.http.message.BasicNameValuePair;
 import edu.missouri.bas.MainActivity;
 import edu.missouri.bas.R;
 import edu.missouri.bas.SensorConnections;
+import edu.missouri.bas.SurveyScheduler;
 import edu.missouri.bas.SurveyStatus;
 import edu.missouri.bas.bluetooth.BluetoothRunnable;
 import edu.missouri.bas.bluetooth.affectiva.AffectivaPacket;
@@ -57,6 +58,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -104,6 +106,10 @@ import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.protocol.HTTP;
 import org.apache.http.util.EntityUtils;
+
+
+
+
 
 
 
@@ -161,6 +167,16 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	public static AlarmManager mAlarmManager;
 	private PendingIntent scheduleSurvey;
 	private PendingIntent drinkfollowupSurvey;
+	/*
+	 * Ricky 2/11
+	 * Alarm manager variables, for scheduling intents
+	 * start the Body Sensor App tomorrow and start the morning report
+	 */
+	public static AlarmManager bAlarmManager;
+	private PendingIntent morningWakeUp;
+	private PendingIntent morningReport;
+	private int iWakeHour;
+	private int iWakeMin;
 	//private static PendingIntent scheduleLocation;
 	private static PendingIntent scheduleCheck;
 	private static PendingIntent triggerSound;
@@ -244,6 +260,11 @@ GooglePlayServicesClient.OnConnectionFailedListener
     
     public static final String END_MIN = "END_MIN";
     
+    public static final String BED_TIME_INFO = "BED_TIME_INFO";
+	public static final String BED_HOUR_INFO = "BED_HOUR_INFO";
+	public static final String BED_MIN_INFO = "BED_MIN_INFO";
+	public static final String BED_TIME = "BED_TIME";
+    
     static String errMSG ="Please check your wifi or dataplan.\r\nThe phone is offline now.";
 	
     static boolean IsScheduled = false;	
@@ -254,6 +275,8 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	
 	//ADD ACTION STRING FOR DRINKING-FOLLOWUP
 	public static final String ACTION_DRINK_FOLLOWUP = "INTENT_ACTION_DRINK_FOLLOWUP";
+	
+	public static final String ACTION_SCHEDULE_MORNING = "INTENT_ACTION_SCHEDULE_MORNING";
 	
 	public static Timer t1=new Timer();
 	public static Timer t2=new Timer();
@@ -337,6 +360,13 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	public static StartSound2 mSound2;*/
 	//static Timer mTimer;
 	int reconnectionAttempts=0;
+	
+	private String wakeHour;
+	private String wakeMin;
+	//END TIME 23:59
+	private int EndHour=23;
+	private int EndMin=59;
+	
 	/*
 	 * (non-Javadoc)
 	 * @see android.app.Service#onBind(android.content.Intent)
@@ -437,6 +467,79 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		scheduleCheck = PendingIntent.getBroadcast(serviceContext, 0, scheduleCheckConnection , 0);
 		mAlarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP,SystemClock.elapsedRealtime()+1000*60*5,1000*60*5,scheduleCheck);
 		mLocationClient = new LocationClient(this, this, this);
+		
+		/* 
+		 * @author Ricky 
+		 * 2/11/14 start the random survey automatically
+		 * 2/12 start random survey just after the service is triggered; 
+		 * old design(reading the morning survey time as the beginning time) is commented.
+		 */
+		
+		
+		
+		//Compare Time part
+		if (!getStatus()){
+			Calendar c = Calendar.getInstance();
+			SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm");
+			String currentTime=dateFormat.format(c.getTime());
+			String []cTime=currentTime.split(":");
+			int StartHour=Integer.parseInt(cTime[0]);
+			int StartMin=Integer.parseInt(cTime[1]);		
+			if (((EndHour-StartHour)*60+(EndMin-StartMin))<=60){
+				Toast.makeText(getApplicationContext(),"Difference between Start and End Time must be at least one hour. Random Survey is canceled",Toast.LENGTH_LONG).show();
+			}
+			else {
+				//Schedule part
+				int Interval=(((EndHour-StartHour)*60)+(EndMin-StartMin))/6;
+				int delay=Interval/2;
+				int Increment=Interval+delay;
+				int TriggerInterval=Interval-delay;
+				Log.d(TAG,String.valueOf(Interval));
+				
+				Date dt1=new Date();				
+				dt1.setHours(StartHour);
+				dt1.setMinutes(StartMin+delay);
+				Date dt2=new Date();
+				dt2.setHours(StartHour);
+				dt2.setMinutes(StartMin+Increment);				
+				Date dt3=new Date();
+				dt3.setHours(StartHour);
+				dt3.setMinutes(StartMin+Increment+Interval);
+				Date dt4=new Date();
+				dt4.setHours(StartHour);
+				dt4.setMinutes(StartMin+Increment+(Interval*2));
+				Date dt5=new Date();
+				dt5.setHours(StartHour);
+				dt5.setMinutes(StartMin+Increment+(Interval*3));
+				Date dt6=new Date();
+				dt6.setHours(StartHour);
+				dt6.setMinutes(StartMin+Increment+(Interval*4));
+				rTask1 = new ScheduleSurvey(TriggerInterval);
+				rTask2 = new ScheduleSurvey(TriggerInterval);
+				rTask3 = new ScheduleSurvey(TriggerInterval);
+				rTask4 = new ScheduleSurvey(TriggerInterval);
+				rTask5 = new ScheduleSurvey(TriggerInterval);
+				rTask6 = new ScheduleSurvey(TriggerInterval);				
+				t1.schedule(rTask1,dt1);	
+				t2.schedule(rTask2,dt2);
+				t3.schedule(rTask3,dt3);
+				t4.schedule(rTask4,dt4);
+				t5.schedule(rTask5,dt5);
+				t6.schedule(rTask6,dt6);
+				setStatus(true);
+				//Log.d("random","random survey is scheduled");
+			}
+			//End of Random Survey Schedule
+			
+			//Get Time for the morning trigger
+			SharedPreferences bedTime = this.getSharedPreferences(BED_TIME, MODE_PRIVATE);
+			wakeHour = bedTime.getString(BED_HOUR_INFO, "none");
+			wakeMin = bedTime.getString(BED_MIN_INFO, "none");
+			if (wakeHour.equals("none")||wakeMin.equals("none")){
+				setMorningSurveyAlarm(11, 59);
+			}
+			
+		}
 	}
 	
 	
@@ -575,11 +678,12 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	private void prepareAlarms(){
 		IntentFilter locationSchedulerFilter = new IntentFilter(ACTION_SCHEDULE_LOCATION);
 		IntentFilter locationInterruptSchedulerFilter = new IntentFilter(ACTION_STOP_LOCATIONCONTROL);
-		IntentFilter surveyScheduleFilter = new IntentFilter(ACTION_SCHEDULE_SURVEY);
+		//IntentFilter surveyScheduleFilter = new IntentFilter(ACTION_SCHEDULE_SURVEY);
 		IntentFilter surveyTest = new IntentFilter("ACTION_SURVEY_TEST");
 		
 		//ADD INTENTFILTER FOR DRINKING-FOLLOWUP
 		IntentFilter followUpFilter = new IntentFilter(ACTION_DRINK_FOLLOWUP);
+		IntentFilter MorningFilter = new IntentFilter(ACTION_SCHEDULE_MORNING);
 
 	/*	Intent scheduleLocationIntent = new Intent(SensorService.ACTION_SCHEDULE_LOCATION);
 		scheduleLocation = PendingIntent.getBroadcast(
@@ -596,8 +700,9 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		SensorService.this.registerReceiver(alarmReceiver, locationFoundFilter);
 		SensorService.this.registerReceiver(alarmReceiver, locationSchedulerFilter);		
 		SensorService.this.registerReceiver(alarmReceiver, locationInterruptSchedulerFilter);
-		SensorService.this.registerReceiver(alarmReceiver, surveyScheduleFilter);
+		//SensorService.this.registerReceiver(alarmReceiver, surveyScheduleFilter);
 		SensorService.this.registerReceiver(alarmReceiver, surveyTest);
+		SensorService.this.registerReceiver(alarmReceiver, MorningFilter);
 		//Register the drink-followup to the alarmReceiver
 		SensorService.this.registerReceiver(alarmReceiver, followUpFilter);
 		SensorService.this.registerReceiver(soundRequestReceiver,soundRequest);
@@ -803,7 +908,8 @@ GooglePlayServicesClient.OnConnectionFailedListener
 				Location mCurrentLocation=mLocationClient.getLastLocation();
 				writeLocationToFile(mCurrentLocation);				
 			}
-			
+		  	//Ricky 2/11/14
+			/*
 			else if(action.equals(SensorService.ACTION_SCHEDULE_SURVEY))
 			{
 				Log.d(TAG,"Received alarm event - schedule survey");								
@@ -848,6 +954,20 @@ GooglePlayServicesClient.OnConnectionFailedListener
 				t5.schedule(rTask5,dt5);
 				t6.schedule(rTask6,dt6);
 				setStatus(true);
+			}
+			*/
+			else if(action.equals(SensorService.ACTION_SCHEDULE_MORNING))
+			{
+				if (wakeHour.equals("none")||wakeMin.equals("none")){
+					iWakeHour = 11;
+					iWakeMin = 59;
+				} else {
+					iWakeHour = Integer.parseInt(wakeHour);
+					iWakeMin = Integer.parseInt(wakeMin);
+				}
+				bAlarmManager.cancel(morningReport);
+				bAlarmManager.cancel(morningWakeUp);
+				setMorningSurveyAlarm(iWakeHour,iWakeMin);
 			}
 		  	//ADD THE PROCESSING AFTER THE RECEIVER RECEIVE THE FOLLOWUP MSG
 			else if(action.equals(SensorService.ACTION_DRINK_FOLLOWUP)){
@@ -1207,6 +1327,34 @@ GooglePlayServicesClient.OnConnectionFailedListener
         // Display the connection status
         Toast.makeText(this, "Disconnected. Please re-connect.",
                 Toast.LENGTH_SHORT).show();
+    }
+    
+    private void setMorningSurveyAlarm(int h, int i){
+    	Calendar tT = Calendar.getInstance();
+    	/*
+    	 *	If current time is before 3 A.M, it means the user maybe overnight. 
+    	 *	Keep alarm triggered at the same day.
+    	 *	Otherwise set trigger time to tomorrow.
+    	 */
+		if (tT.get(Calendar.HOUR_OF_DAY)>3) {
+			tT.set(Calendar.DAY_OF_MONTH, tT.get(Calendar.DAY_OF_MONTH)+1);
+		}
+		tT.set(Calendar.HOUR_OF_DAY, h);
+		tT.set(Calendar.MINUTE, i);
+		
+		bAlarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+		Intent mIntent = new Intent(SensorService.serviceContext, MainActivity.class);
+		morningWakeUp = PendingIntent.getActivity(SensorService.serviceContext, 0,
+				mIntent, Intent.FLAG_ACTIVITY_NEW_TASK);
+		bAlarmManager.setRepeating(AlarmManager.RTC_WAKEUP,
+				tT.getTimeInMillis() ,86400000, morningWakeUp);
+		Intent mRIntent = new Intent(SensorService.serviceContext, SurveyPinCheck.class);
+		mRIntent.putExtra("survey_name", "MORNING_REPORT");
+		mRIntent.putExtra("survey_file", "MorningReportParcel.xml");
+		morningReport = PendingIntent.getActivity(SensorService.serviceContext, 0, mRIntent, Intent.FLAG_ACTIVITY_NEW_TASK);
+		//trigger morning report 60 seconds later than MainActivity is restarted by bAlarmManager 
+		bAlarmManager.setRepeating(AlarmManager.RTC_WAKEUP,
+				tT.getTimeInMillis()+1000*60,86400000, morningReport);
     }
  }
 

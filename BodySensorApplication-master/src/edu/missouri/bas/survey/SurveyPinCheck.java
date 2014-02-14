@@ -1,5 +1,6 @@
 package edu.missouri.bas.survey;
 
+import java.util.Date;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -20,7 +21,7 @@ import android.widget.EditText;
 import android.widget.TextView;
 import edu.missouri.bas.R;
 import edu.missouri.bas.service.SensorService;
-import edu.missouri.bas.survey.XMLSurveyActivity.StartSound;
+
 
 public class SurveyPinCheck extends Activity {
 	
@@ -36,14 +37,28 @@ public class SurveyPinCheck extends Activity {
     
     
 
-    public class StartSound extends TimerTask {
+    private class StartSound extends TimerTask {
     	@Override    	
     	public void run(){ 
         mp = MediaPlayer.create(getApplicationContext(), R.raw.bodysensor_alarm);
     	mp.start();
     	}
     }
+    
+    private class SurveyNotCompletedAlarm extends TimerTask{
+
+		@Override
+		public void run() {
+			// TODO Auto-generated method stub
+			Log.d("PINAlarm","Final ALarm");
+			finish();
+			this.cancel();
+			
+		}
+    	
+    }
 	
+	@SuppressWarnings("deprecation")
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		super.onCreate(savedInstanceState);
@@ -54,11 +69,42 @@ public class SurveyPinCheck extends Activity {
 	    bButton = (Button)findViewById(R.id.button_exit);
 	    pButton = (Button)findViewById(R.id.button_pin);
 	    
+	    /*
+         * Here to alarm the user to do the survey
+         * Ricky 2014/2/13
+         */
+        Date aTime1 = new Date();
+        Date aTime2 = new Date();
+        Date aTime3 = new Date();
+        Date aTime4 = new Date();
+        aTime1.setMinutes(aTime1.getMinutes()+5);
+        aTime2.setMinutes(aTime2.getMinutes()+10);
+        aTime3.setMinutes(aTime3.getMinutes()+15);
+        aTime4.setMinutes(aTime4.getMinutes()+15);
+        aTime4.setSeconds(aTime4.getSeconds()+20);
+        SensorService.alarmTask1 = new StartSound();
+        SensorService.alarmTask2 = new StartSound();
+        SensorService.alarmTask3 = new StartSound();
+        SensorService.alarmTask4 = new SurveyNotCompletedAlarm();
+        SensorService.alarmTimer.schedule(SensorService.alarmTask1, aTime1);
+        SensorService.alarmTimer.schedule(SensorService.alarmTask2, aTime2);
+        SensorService.alarmTimer.schedule(SensorService.alarmTask3, aTime3);
+        SensorService.alarmTimer.schedule(SensorService.alarmTask4, aTime4);
+	    //End of the alarm part
+        
 	    surveyName = getIntent().getStringExtra("survey_name");
 		surveyFile = getIntent().getStringExtra("survey_file");
 		// Alarm when the following two kind of survey is triggered
 		if(surveyName.equalsIgnoreCase("RANDOM_ASSESSMENT") && surveyFile.equalsIgnoreCase("RandomAssessmentParcel.xml"))
 		{
+			Timer t=new Timer();
+			t.schedule(new  StartSound(),1000*5);			
+			Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+	        v.vibrate(1000);
+		}
+		//ADD VOICE AND VIBRATE CONTROL TO THE MORNING REPORT
+		if(surveyName.equalsIgnoreCase("MORNING_REPORT") && surveyFile.equalsIgnoreCase("MorningReportParcel.xml"))
+		{	
 			Timer t=new Timer();
 			t.schedule(new  StartSound(),1000*5);			
 			Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
@@ -181,4 +227,22 @@ public class SurveyPinCheck extends Activity {
         }.start();
 	}
 	*/
+	 private static void cancelAllTimerTask()
+		{
+			if(SensorService.alarmTimer!=null)
+			{	
+				//Boolean rickytest = alarmTask1.cancel();
+				SensorService.alarmTask1.cancel();
+				SensorService.alarmTask2.cancel();
+				SensorService.alarmTask3.cancel();
+				SensorService.alarmTask4.cancel();
+				SensorService.alarmTimer.purge();
+				//Log.d(TAG, rickytest.toString());
+				//alarmTimer.cancel();
+			}
+		}	
+	  protected void onDestroy(){
+	    	cancelAllTimerTask();
+	    	super.onDestroy();
+	    }
 }
