@@ -54,29 +54,22 @@ public class SurveyStatus extends Activity{
 			public void onClick(View v) {
 				Intent i = new Intent(getApplicationContext(), SurveyScheduler.class);
 				startActivity(i);
+				finish();
 			}
         });
 		
 		btnReturn.setOnClickListener(new View.OnClickListener(){
 			public void onClick(View v) {
-				Intent i = new Intent(getApplicationContext(), MainActivity.class);
-				startActivity(i);
+				onBackPressed();
+				finish();
 			}
-        });
-		
-		
-		
+        });		
 	}
 	@Override
 	protected void onDestroy() {
 		// TODO Auto-generated method stub
 		super.onDestroy();
 	}
-	
-	
-	
-	
-	
 	
 
 }

@@ -32,6 +32,7 @@ import edu.missouri.bas.R;
 import edu.missouri.bas.SensorConnections;
 import edu.missouri.bas.SurveyScheduler;
 import edu.missouri.bas.SurveyStatus;
+import edu.missouri.bas.activities.AdminManageActivity;
 import edu.missouri.bas.bluetooth.BluetoothRunnable;
 import edu.missouri.bas.bluetooth.affectiva.AffectivaPacket;
 import edu.missouri.bas.bluetooth.affectiva.AffectivaRunnable;
@@ -59,6 +60,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -112,10 +114,6 @@ import org.apache.http.util.EntityUtils;
 
 
 
-
-
-
-
 //Ricky 2013/12/09
 import android.os.AsyncTask;
 
@@ -123,7 +121,7 @@ public class SensorService extends Service implements
 GooglePlayServicesClient.ConnectionCallbacks,
 GooglePlayServicesClient.OnConnectionFailedListener
 { 
-
+	public static boolean mIsRunning=false;
     private final String TAG = "SensorService";   
 	/*
 	 * Android component variables used by the service
@@ -160,7 +158,8 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	
 	PowerManager mPowerManager;
 	WakeLock serviceWakeLock;
-	
+	//Ricky 2014/4/1
+	private int randomSeq = -1;
 	/*
 	 * Alarm manager variables, for scheduling intents
 	 */
@@ -175,10 +174,13 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	public static AlarmManager bAlarmManager;
 	private PendingIntent morningWakeUp;
 	private PendingIntent morningReport;
+	// Ricky 3/5/14
+	private PendingIntent AccLightRestart;
 	private int iWakeHour;
 	private int iWakeMin;
 	//private static PendingIntent scheduleLocation;
 	private static PendingIntent scheduleCheck;
+	private static PendingIntent activityRecogRestart;
 	private static PendingIntent triggerSound;
 	private static PendingIntent triggerSound2;
 	//private PendingIntent surveyIntent;
@@ -277,6 +279,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	public static final String ACTION_DRINK_FOLLOWUP = "INTENT_ACTION_DRINK_FOLLOWUP";
 	
 	public static final String ACTION_SCHEDULE_MORNING = "INTENT_ACTION_SCHEDULE_MORNING";
+	public static final String ACTION_SCHEDULE_MORNING_RESTART = "INTENT_ACTION_SCHEDULE_MORNING_RESTART";
 	
 	public static Timer t1=new Timer();
 	public static Timer t2=new Timer();
@@ -347,7 +350,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	public static int currentUserActivity=9;
 	public static boolean IsRetrievingUpdates=false;
 	LocationClient mLocationClient;
-	
+	public static final String ACTION_ACTIVITY_RECOG_RESTART = "ACTION_ACTIVITY_RECOG_RESTART";
 	
 		
 	private SoundPool mSoundPool;
@@ -366,7 +369,24 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	//END TIME 23:59
 	private int EndHour=23;
 	private int EndMin=59;
+	private SharedPreferences bedTime;
+	private Editor bedEditor;
+	int StartHour;
+	int StartMin;
+	//boolean MornReportIsDone; 
 	
+	//Id and Password
+	//2014/2/25
+	private static String ID;
+	private static String PWD;	
+	
+	public static String getPWD() {
+		return PWD;
+	}
+	
+	public static String getID() {
+		return ID;
+	}
 	/*
 	 * (non-Javadoc)
 	 * @see android.app.Service#onBind(android.content.Intent)
@@ -374,13 +394,38 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	@Override
 	public IBinder onBind(Intent arg0) {
 		return mBinder;
-			}
+	}
+	//Ricky 3/14 midNightCheck Timer Task Part
+	public static boolean bedFlag = false;
+	public static TimerTask midNightCheckTask;
+	public static Timer midNightCheckTimer = new Timer();
+	public class midNightCheck extends TimerTask {
+    	@Override    	
+    	public void run(){ 
+	    	Log.d("wtest","midNightCheck");
+	    	if (!bedFlag){
+		    	//PARTIALLY STOP ALL SENSORS & RANDOM SURVEY
+				stopPartialService();				
+				//Schedule partially sensor restart
+				setMorningSensorRestart(Integer.parseInt(wakeHour),Integer.parseInt(wakeMin));
+				setMorningSurveyAlarm(Integer.parseInt(wakeHour),Integer.parseInt(wakeMin));
+				Log.d("wtest",wakeHour+":"+wakeMin);
+	    	}
+	    	bedFlag = false;
+    	}
+	}
+	//end of midNightCheckTimer Task Part
 	
 	@SuppressWarnings("deprecation")
 	@Override
 	public void onCreate(){
 		
 		super.onCreate();
+		//Get ID and PWD
+		SharedPreferences shp = getSharedPreferences("PINLOGIN", Context.MODE_PRIVATE);
+	    ID = shp.getString(AdminManageActivity.ASID, "");
+	    PWD = shp.getString(AdminManageActivity.ASPWD, "");
+	    
 		Log.d(TAG,"Starting sensor service");
 		mSoundPool = new SoundPool(4, AudioManager.STREAM_MUSIC, 100);
         soundsMap = new HashMap<Integer, Integer>();
@@ -468,79 +513,48 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		mAlarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP,SystemClock.elapsedRealtime()+1000*60*5,1000*60*5,scheduleCheck);
 		mLocationClient = new LocationClient(this, this, this);
 		
-		/* 
-		 * @author Ricky 
-		 * 2/11/14 start the random survey automatically
-		 * 2/12 start random survey just after the service is triggered; 
-		 * old design(reading the morning survey time as the beginning time) is commented.
-		 */
-		
-		
-		
-		//Compare Time part
-		if (!getStatus()){
-			Calendar c = Calendar.getInstance();
-			SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm");
-			String currentTime=dateFormat.format(c.getTime());
-			String []cTime=currentTime.split(":");
-			int StartHour=Integer.parseInt(cTime[0]);
-			int StartMin=Integer.parseInt(cTime[1]);		
-			if (((EndHour-StartHour)*60+(EndMin-StartMin))<=60){
-				Toast.makeText(getApplicationContext(),"Difference between Start and End Time must be at least one hour. Random Survey is canceled",Toast.LENGTH_LONG).show();
-			}
-			else {
-				//Schedule part
-				int Interval=(((EndHour-StartHour)*60)+(EndMin-StartMin))/6;
-				int delay=Interval/2;
-				int Increment=Interval+delay;
-				int TriggerInterval=Interval-delay;
-				Log.d(TAG,String.valueOf(Interval));
-				
-				Date dt1=new Date();				
-				dt1.setHours(StartHour);
-				dt1.setMinutes(StartMin+delay);
-				Date dt2=new Date();
-				dt2.setHours(StartHour);
-				dt2.setMinutes(StartMin+Increment);				
-				Date dt3=new Date();
-				dt3.setHours(StartHour);
-				dt3.setMinutes(StartMin+Increment+Interval);
-				Date dt4=new Date();
-				dt4.setHours(StartHour);
-				dt4.setMinutes(StartMin+Increment+(Interval*2));
-				Date dt5=new Date();
-				dt5.setHours(StartHour);
-				dt5.setMinutes(StartMin+Increment+(Interval*3));
-				Date dt6=new Date();
-				dt6.setHours(StartHour);
-				dt6.setMinutes(StartMin+Increment+(Interval*4));
-				rTask1 = new ScheduleSurvey(TriggerInterval);
-				rTask2 = new ScheduleSurvey(TriggerInterval);
-				rTask3 = new ScheduleSurvey(TriggerInterval);
-				rTask4 = new ScheduleSurvey(TriggerInterval);
-				rTask5 = new ScheduleSurvey(TriggerInterval);
-				rTask6 = new ScheduleSurvey(TriggerInterval);				
-				t1.schedule(rTask1,dt1);	
-				t2.schedule(rTask2,dt2);
-				t3.schedule(rTask3,dt3);
-				t4.schedule(rTask4,dt4);
-				t5.schedule(rTask5,dt5);
-				t6.schedule(rTask6,dt6);
-				setStatus(true);
-				//Log.d("random","random survey is scheduled");
-			}
-			//End of Random Survey Schedule
-			
-			//Get Time for the morning trigger
-			SharedPreferences bedTime = this.getSharedPreferences(BED_TIME, MODE_PRIVATE);
-			wakeHour = bedTime.getString(BED_HOUR_INFO, "none");
-			wakeMin = bedTime.getString(BED_MIN_INFO, "none");
-			if (wakeHour.equals("none")||wakeMin.equals("none")){
-				setMorningSurveyAlarm(11, 59);
-			}
-			
+		//Get Time for the morning trigger
+		//Only trigger the morning-surveyAlarm when wakeTime is never set.
+		bedTime = this.getSharedPreferences(BED_TIME, MODE_PRIVATE);
+		wakeHour = bedTime.getString(BED_HOUR_INFO, "none");
+		wakeMin = bedTime.getString(BED_MIN_INFO, "none");
+		bAlarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+		if (wakeHour.equals("none")||wakeMin.equals("none")){
+			setMorningSurveyAlarm(11, 59);			
 		}
-	}
+		
+		//MornReportIsDone = bedTime.getBoolean("MornReportDone", false);
+		StartHour = bedTime.getInt("RandomSurveyStartHour", 11);
+		StartMin = bedTime.getInt("RandomSurveyStartMin", 59);
+		
+		/** 
+		 * @author Ricky 
+		 * 3/4/14 
+		 * First Check whether random survey is already triggered.
+		 * set the random survey start time at 11:59 if morning survey is never set.
+		 * Otherwise use old settings stored in the local storage.
+		 * (for the case when App is revoked from unexpected crash)
+		 */		
+		//Schedule part
+		if (!getStatus()){
+			//if (!MornReportIsDone){
+			//	triggerRandomSurvey(11,59);
+			//} else {			
+				triggerRandomSurvey(StartHour,StartMin);
+			//}
+		}
+		
+		//Ricky 3/14 Midnight Timer schedule part
+		Date midNightT = new Date();
+		midNightT.setHours(23);
+		midNightT.setMinutes(58);
+		//for testing
+		//midNightT.setMinutes(midNightT.getMinutes()+1);
+		Log.d("wtest",wakeHour+":"+wakeMin);
+		midNightCheckTask = new midNightCheck();
+		midNightCheckTimer.schedule(midNightCheckTask, midNightT);
+    }
+	
 	
 	
 	
@@ -592,6 +606,14 @@ GooglePlayServicesClient.OnConnectionFailedListener
 			else if(action.equals(SensorService.ACTION_START_SENSORS))
 			{
 				sensorThread.run();
+				Log.d(TAG,"Sensor Start");
+			}
+			else if(action.equals(SensorService.ACTION_ACTIVITY_RECOG_RESTART)){
+				activityRecognition=new ActivityRecognitionScan(getApplicationContext());
+				activityRecognition.startActivityRecognitionScan();
+				//mLocationClient = new LocationClient(SensorService.this, SensorService.this, SensorService.this);
+				mLocationClient.connect();
+				Log.d(TAG,"Location Start");
 			}
 		}
 		
@@ -599,9 +621,9 @@ GooglePlayServicesClient.OnConnectionFailedListener
         
 	private Runnable sensorThread = new Runnable() {
 	    public void run() {
-	    	Accelerometer=new InternalSensor(mSensorManager,Sensor.TYPE_ACCELEROMETER,SensorManager.SENSOR_DELAY_NORMAL,bluetoothMacAddress);
+	    	Accelerometer=new InternalSensor(mSensorManager,Sensor.TYPE_ACCELEROMETER,SensorManager.SENSOR_DELAY_NORMAL,ID);
 			Accelerometer.run();
-			LightSensor=new InternalSensor(mSensorManager,Sensor.TYPE_LIGHT,SensorManager.SENSOR_DELAY_NORMAL,bluetoothMacAddress);
+			LightSensor=new InternalSensor(mSensorManager,Sensor.TYPE_LIGHT,SensorManager.SENSOR_DELAY_NORMAL,ID);
 			LightSensor.run();
 	    }
 	};
@@ -684,6 +706,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		//ADD INTENTFILTER FOR DRINKING-FOLLOWUP
 		IntentFilter followUpFilter = new IntentFilter(ACTION_DRINK_FOLLOWUP);
 		IntentFilter MorningFilter = new IntentFilter(ACTION_SCHEDULE_MORNING);
+		IntentFilter RestartMorningFilter = new IntentFilter(ACTION_SCHEDULE_MORNING_RESTART);
 
 	/*	Intent scheduleLocationIntent = new Intent(SensorService.ACTION_SCHEDULE_LOCATION);
 		scheduleLocation = PendingIntent.getBroadcast(
@@ -697,12 +720,14 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		IntentFilter locationFoundFilter = new IntentFilter(LocationControl.INTENT_ACTION_LOCATION);
 		IntentFilter sound1=new IntentFilter(ACTION_TRIGGER_SOUND);
 		IntentFilter sound2=new IntentFilter(ACTION_TRIGGER_SOUND2);
+		IntentFilter activityRecognizationRequest =new IntentFilter(ACTION_ACTIVITY_RECOG_RESTART);
 		SensorService.this.registerReceiver(alarmReceiver, locationFoundFilter);
 		SensorService.this.registerReceiver(alarmReceiver, locationSchedulerFilter);		
 		SensorService.this.registerReceiver(alarmReceiver, locationInterruptSchedulerFilter);
 		//SensorService.this.registerReceiver(alarmReceiver, surveyScheduleFilter);
 		SensorService.this.registerReceiver(alarmReceiver, surveyTest);
 		SensorService.this.registerReceiver(alarmReceiver, MorningFilter);
+		SensorService.this.registerReceiver(alarmReceiver, RestartMorningFilter);
 		//Register the drink-followup to the alarmReceiver
 		SensorService.this.registerReceiver(alarmReceiver, followUpFilter);
 		SensorService.this.registerReceiver(soundRequestReceiver,soundRequest);
@@ -710,6 +735,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		SensorService.this.registerReceiver(soundRequestReceiver,sound2);
 		SensorService.this.registerReceiver(checkRequestReceiver,checkRequest);
 		SensorService.this.registerReceiver(checkRequestReceiver,startSensors);
+		SensorService.this.registerReceiver(checkRequestReceiver,activityRecognizationRequest);
 		IntentFilter chestSensorData = new IntentFilter(ACTION_CONNECT_CHEST);
 		SensorService.this.registerReceiver(chestSensorReceiver,chestSensorData);
 		}
@@ -719,21 +745,33 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	private class ScheduleSurvey extends TimerTask
 	{
 		int TriggerInterval;
+		//Random Sequence
+		int RandomID = 0;
+		
 		public ScheduleSurvey(int Time)
 		{
 			TriggerInterval=Time;			
+		}
+		
+		public ScheduleSurvey(int Time, int ID)
+		{
+			TriggerInterval=Time;
+			RandomID=ID;
 		}
 
 		@Override
 		public void run() {					
 		// TODO Auto-generated method stub
-			Log.d("TAG",drinkUpFlag.toString());
+			Log.d(TAG,"drinkUpFlag: "+drinkUpFlag.toString());
+			Log.d("wtest","random is running: "+RandomID);
 		  if (drinkUpFlag==false){
 			  Random rand=new Random();
 			  int TriggerTime=rand.nextInt(TriggerInterval)+1;		 
 			  Intent i = new Intent(serviceContext, SurveyPinCheck.class);
 			  i.putExtra("survey_name", "RANDOM_ASSESSMENT");
-			  i.putExtra("survey_file", "RandomAssessmentParcel.xml");	
+			  i.putExtra("survey_file", "RandomAssessmentParcel.xml");
+			  if (RandomID!=0)
+				  i.putExtra("random_sequence", RandomID);
 			  scheduleSurvey = PendingIntent.getActivity(SensorService.this, 0,
 					                i, Intent.FLAG_ACTIVITY_NEW_TASK);
 			  mAlarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP,
@@ -801,9 +839,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	 * @see android.app.Service#onDestroy()
 	 */
 	@Override
-	public void onDestroy(){
-	
-		
+	public void onDestroy(){			
 		File f = new File(BASE_PATH,"SensorServiceEvents.txt");
 		Calendar cal=Calendar.getInstance();
 		try {
@@ -844,8 +880,12 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		mAlarmManager.cancel(triggerSound2);
 		mLocationClient.disconnect();
 		activityRecognition.stopActivityRecognitionScan();		
-		Accelerometer.stop();
-		LightSensor.stop();
+		if(Accelerometer != null){
+			Accelerometer.stop();
+		}
+		if(LightSensor != null){
+			LightSensor.stop();
+		}
 		
 		CancelTask(alarmTask1);
 		CancelTask(alarmTask2);
@@ -858,6 +898,9 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		CancelTask(rTask4);
 		CancelTask(rTask5);
 		CancelTask(rTask6);
+		//Ricky 3/14
+		CancelTask(midNightCheckTask);
+		
 		/*
 		 * If we try to cancel the timer, when we reuse the timer
 		 * the system will show error msg
@@ -878,6 +921,8 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		PurgeTimers(t6);
 		PurgeTimers(t7);
 		PurgeTimers(alarmTimer);
+		//Ricky 3/14
+		PurgeTimers(midNightCheckTimer);
 		setStatus(false);
 		
 		serviceWakeLock.release();
@@ -957,7 +1002,9 @@ GooglePlayServicesClient.OnConnectionFailedListener
 			}
 			*/
 			else if(action.equals(SensorService.ACTION_SCHEDULE_MORNING))
-			{
+			{	
+				wakeHour = bedTime.getString(BED_HOUR_INFO, "none");
+				wakeMin = bedTime.getString(BED_MIN_INFO, "none");
 				if (wakeHour.equals("none")||wakeMin.equals("none")){
 					iWakeHour = 11;
 					iWakeMin = 59;
@@ -967,7 +1014,29 @@ GooglePlayServicesClient.OnConnectionFailedListener
 				}
 				bAlarmManager.cancel(morningReport);
 				bAlarmManager.cancel(morningWakeUp);
+				Calendar bRT = Calendar.getInstance();
 				setMorningSurveyAlarm(iWakeHour,iWakeMin);
+				if (bRT.get(Calendar.HOUR_OF_DAY)>=21){
+					bAlarmManager.cancel(AccLightRestart);
+					//PARTIALLY STOP ALL SENSORS & RANDOM SURVEY
+					stopPartialService();				
+					//Schedule partially sensor restart
+					setMorningSensorRestart(iWakeHour,iWakeMin);
+					SensorService.bedFlag = true;
+				}
+			}
+			else if(action.equals(SensorService.ACTION_SCHEDULE_MORNING_RESTART))
+			{
+				if (wakeHour.equals("none")||wakeMin.equals("none")){
+					iWakeHour = 11;
+					iWakeMin = 59;
+				} else {
+					iWakeHour = Integer.parseInt(wakeHour);
+					iWakeMin = Integer.parseInt(wakeMin);
+				}
+				
+				setMorningSurveyAlarm(iWakeHour,iWakeMin);
+				Log.d(TAG,"BOOT BROADCAST RECEIVED");
 			}
 		  	//ADD THE PROCESSING AFTER THE RECEIVER RECEIVE THE FOLLOWUP MSG
 			else if(action.equals(SensorService.ACTION_DRINK_FOLLOWUP)){
@@ -1023,6 +1092,11 @@ GooglePlayServicesClient.OnConnectionFailedListener
 						(HashMap<String, List<String>>) intent.getSerializableExtra(XMLSurveyActivity.INTENT_EXTRA_SURVEY_RESULTS);
 				String surveyName = 
 						intent.getStringExtra(XMLSurveyActivity.INTENT_EXTRA_SURVEY_NAME);
+				//Ricky 4/1
+				//dealing with random sequence
+				if (surveyName.equalsIgnoreCase("RANDOM_ASSESSMENT")){
+					randomSeq = intent.getIntExtra("random_sequence", 0);
+				}
 				
 				try {
 					writeSurveyToFile(surveyName, results, intent.getLongExtra(XMLSurveyActivity.INTENT_EXTRA_COMPLETION_TIME,0L));
@@ -1031,31 +1105,61 @@ GooglePlayServicesClient.OnConnectionFailedListener
 					Log.e(TAG,"ERROR: Failed to write survey to file!");
 				}
 				Log.d(TAG,"Done writing file");
-				
+				/**
+				 * @author Ricky 
+				 * 2014/3/3
+				 * 1st check whether survey is morning report
+				 * then check whether mornReport was submitted today
+				 * If not, do the following thing. Otherwise, do nothing. 
+				 * 2nd store random survey start time
+				 * 3rd call random survey functions
+				 * 4th store morningReoprtIsDone flag to local file
+				 */
+				if (surveyName.equals("MORNING_REPORT")){
+					//if (!MornReportIsDone){
+						Log.d("wtest","Morning trigger time");
+						Calendar c = Calendar.getInstance();
+						SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm");
+						String currentTime=dateFormat.format(c.getTime());
+						String []cTime=currentTime.split(":");
+						StartHour=Integer.parseInt(cTime[0]);
+						StartMin=Integer.parseInt(cTime[1]);		
+						if (((EndHour-StartHour)*60+(EndMin-StartMin))<=60){
+							Toast.makeText(getApplicationContext(),"Difference between Start and End Time must be at least one hour. Random Survey is canceled",Toast.LENGTH_LONG).show();
+						}
+						else {
+							//2nd part
+							bedEditor = bedTime.edit();
+							bedEditor.putInt("RandomSurveyStartHour", StartHour);
+							bedEditor.putInt("RandomSurveyStartMin", StartMin);
+							//bedEditor.putBoolean("MornReportDone", true);
+							bedEditor.commit();
+							//3rd part														
+							triggerRandomSurvey(StartHour,StartMin);
+							
+						}
+					//}
+				}
 			}
 		}
 	};
-	public static void CancelTask(TimerTask tTask){
+	public void CancelTask(TimerTask tTask){
 		if  (tTask!=null)
 		tTask.cancel();
 	}
-	public static void CancelTimers(Timer t)
+	public void CancelTimers(Timer t)
 	{
-		//if(t1!=null&&t2!=null&&t3!=null&&t4!=null&&t5!=null&&t6!=null&&mTimer!=null)
 		if(t!=null)
 		{
 		t.cancel();
 		t.purge();	
-		//mTimer.cancel();
 		}
 	}
-	public static void PurgeTimers(Timer t)
+	public void PurgeTimers(Timer t)
 	{
-		//if(t1!=null&&t2!=null&&t3!=null&&t4!=null&&t5!=null&&t6!=null&&mTimer!=null)
 		if(t!=null)
 		{
 		t.purge();	
-		//mTimer.cancel();
 		}
 	}
 	
@@ -1076,7 +1180,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		Calendar cl=Calendar.getInstance();
 		SimpleDateFormat curFormater = new SimpleDateFormat("MMMMM_dd"); 
 		String dateObj =curFormater.format(cl.getTime());
-		File f = new File(BASE_PATH,"locations."+bluetoothMacAddress+"."+dateObj+".txt");
+		File f = new File(BASE_PATH,"locations."+ID+"."+dateObj+".txt");
 		
 		Calendar cal=Calendar.getInstance();
 		cal.setTimeZone(TimeZone.getTimeZone("US/Central"));	
@@ -1089,7 +1193,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 				//sendDatatoServer("locations."+bluetoothMacAddress+"."+dateObj,toWrite);
 				//Ricky
 				TransmitData transmitData=new TransmitData();
-				transmitData.execute("locations."+bluetoothMacAddress+"."+dateObj,toWrite);
+				transmitData.execute("locations."+ID+"."+dateObj,toWrite);
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -1121,7 +1225,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 		Calendar cl=Calendar.getInstance();
 		SimpleDateFormat curFormater = new SimpleDateFormat("MMMMM_dd"); 
 		String dateObj =curFormater.format(cl.getTime());
-		File f = new File(BASE_PATH,surveyName+"."+bluetoothMacAddress+"."+dateObj+".txt");
+		File f = new File(BASE_PATH,surveyName+"."+ID+"."+dateObj+".txt");
 		Log.d(TAG,"File: "+f.getName());
 		
 		StringBuilder sb = new StringBuilder(100);
@@ -1149,12 +1253,17 @@ GooglePlayServicesClient.OnConnectionFailedListener
 			}
 			if(i != sorted.size()-1) sb.append(",");
 		}
+		//Ricky 2014/4/1
+		//dealing with the random sequence
+		if (surveyName.equalsIgnoreCase("RANDOM_ASSESSMENT")) {
+			sb.append(",seq:"+randomSeq);
+		}
 		sb.append("\n");
+		
 		//sendDatatoServer(surveyName+"."+bluetoothMacAddress+"."+dateObj,sb.toString());
 		//Ricky 2013/12/09
 		TransmitData transmitData=new TransmitData();
-		transmitData.execute(surveyName+"."+bluetoothMacAddress+"."+dateObj,sb.toString());
-				writeToFile(f,sb.toString());
+		transmitData.execute(surveyName+"."+ID+"."+dateObj,sb.toString());
 		writeToFile(f,sb.toString());
 	}
 	
@@ -1175,7 +1284,7 @@ GooglePlayServicesClient.OnConnectionFailedListener
 				Toast.makeText(getApplicationContext(),"Intent Received",Toast.LENGTH_LONG).show();
 				String address=intent.getStringExtra(KEY_ADDRESS);
 				String deviceName=intent.getStringExtra("KEY_DEVICE_NAME");
-				equivitalThread=new EquivitalRunnable(address,deviceName,bluetoothMacAddress);
+				equivitalThread=new EquivitalRunnable(address,deviceName,ID);
 				equivitalThread.run();
 				Calendar c=Calendar.getInstance();
 				SimpleDateFormat curFormater = new SimpleDateFormat("MMMMM_dd"); 
@@ -1214,8 +1323,8 @@ GooglePlayServicesClient.OnConnectionFailedListener
 	         String dataToSend=strings[1];
 	         if(checkDataConnectivity())
 	 		{
-	         //HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Crt/writeArrayToFile.php");
-	         HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Test/writeArrayToFile.php");
+	         HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Crt/writeArrayToFile.php");
+	         //HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Test/writeArrayToFile.php");
 	         List<NameValuePair> params = new ArrayList<NameValuePair>();
 	         //file_name 
 	         params.add(new BasicNameValuePair("file_name",fileName));        
@@ -1328,33 +1437,231 @@ GooglePlayServicesClient.OnConnectionFailedListener
         Toast.makeText(this, "Disconnected. Please re-connect.",
                 Toast.LENGTH_SHORT).show();
     }
-    
+    /**
+     * @author Ricky
+     * @param h wakeHour
+     * @param i wakeMin
+     * Not using {@link #bAlarmManager.setRepeating} 
+     * Instead, Call the {@link #bAlarmManager.set} function everyday.
+     */
     private void setMorningSurveyAlarm(int h, int i){
     	Calendar tT = Calendar.getInstance();
-    	/*
-    	 *	If current time is before 3 A.M, it means the user maybe overnight. 
+    	/**
+    	 * @author Ricky
+    	 *	1st
+    	 *	If current time is in [0,3] A.M, it means the user maybe overnight. 
     	 *	Keep alarm triggered at the same day.
-    	 *	Otherwise set trigger time to tomorrow.
+    	 *	Otherwise[21:00,23:59] set trigger time to tomorrow.
+    	 *	2nd wakeUp App	
+    	 *	3rd set Morning Report/30 seconds delay
     	 */
-		if (tT.get(Calendar.HOUR_OF_DAY)>3) {
+		if (tT.get(Calendar.HOUR_OF_DAY)>=3) {
 			tT.set(Calendar.DAY_OF_MONTH, tT.get(Calendar.DAY_OF_MONTH)+1);
 		}
 		tT.set(Calendar.HOUR_OF_DAY, h);
 		tT.set(Calendar.MINUTE, i);
 		
-		bAlarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
 		Intent mIntent = new Intent(SensorService.serviceContext, MainActivity.class);
 		morningWakeUp = PendingIntent.getActivity(SensorService.serviceContext, 0,
 				mIntent, Intent.FLAG_ACTIVITY_NEW_TASK);
-		bAlarmManager.setRepeating(AlarmManager.RTC_WAKEUP,
-				tT.getTimeInMillis() ,86400000, morningWakeUp);
+		bAlarmManager.setRepeating(AlarmManager.RTC_WAKEUP,tT.getTimeInMillis() ,86400000, morningWakeUp);
+		//bAlarmManager.set(AlarmManager.RTC_WAKEUP,tT.getTimeInMillis(),morningWakeUp);
 		Intent mRIntent = new Intent(SensorService.serviceContext, SurveyPinCheck.class);
-		mRIntent.putExtra("survey_name", "MORNING_REPORT");
+		mRIntent.putExtra("survey_name", "MORNING_REPORT_ALARM");
 		mRIntent.putExtra("survey_file", "MorningReportParcel.xml");
 		morningReport = PendingIntent.getActivity(SensorService.serviceContext, 0, mRIntent, Intent.FLAG_ACTIVITY_NEW_TASK);
-		//trigger morning report 60 seconds later than MainActivity is restarted by bAlarmManager 
-		bAlarmManager.setRepeating(AlarmManager.RTC_WAKEUP,
-				tT.getTimeInMillis()+1000*60,86400000, morningReport);
+		
+		//trigger morning report 30 seconds later than MainActivity is restarted by bAlarmManager 
+		//bAlarmManager.set(AlarmManager.RTC_WAKEUP,tT.getTimeInMillis()+1000*30,morningReport);
+		bAlarmManager.setRepeating(AlarmManager.RTC_WAKEUP,tT.getTimeInMillis()+1000*30,86400000,morningReport);
+    }
+    /**
+     * @author Ricky
+     * @param h
+     * @param i
+     */
+    private void setMorningSensorRestart(int h, int i){
+    	Calendar tT = Calendar.getInstance();
+    	/**
+    	 * @author Ricky
+    	 *	4th start phone build-in sensor Collection part if they are null/30 seconds delay
+    	 */
+		if (tT.get(Calendar.HOUR_OF_DAY)>=3) {
+			tT.set(Calendar.DAY_OF_MONTH, tT.get(Calendar.DAY_OF_MONTH)+1);
+		}
+		tT.set(Calendar.HOUR_OF_DAY, h);
+		tT.set(Calendar.MINUTE, i);				
+		//trigger Acc/Light Sensors 60 seconds later than MainActivity is restarted by bAlarmManager 
+		Intent startACCLightSensors=new Intent(SensorService.ACTION_START_SENSORS);
+		AccLightRestart = PendingIntent.getBroadcast(serviceContext, 0, startACCLightSensors, 0);
+		bAlarmManager.set(AlarmManager.RTC_WAKEUP,tT.getTimeInMillis()+1000*60,AccLightRestart);
+		//Test
+		//Calendar testT = Calendar.getInstance();
+		//bAlarmManager.set(AlarmManager.RTC_WAKEUP,testT.getTimeInMillis()+1000*20,AccLightRestart);		
+		
+		//trigger mLocationClient
+		//Trigger ActivityReconization 70 seconds later than MainActivity is restarted by bAlarmManager 
+		Intent activityRecogR =new Intent(SensorService.ACTION_ACTIVITY_RECOG_RESTART);
+		activityRecogRestart = PendingIntent.getBroadcast(serviceContext, 0, activityRecogR , 0);
+		bAlarmManager.set(AlarmManager.RTC_WAKEUP,tT.getTimeInMillis()+1000*70,activityRecogRestart);
+		//bAlarmManager.set(AlarmManager.RTC_WAKEUP,testT.getTimeInMillis()+1000*30,activityRecogRestart);
+    }
+    /**
+     * @author Ricky
+     * @param startH
+     * @param startM
+     */
+    @SuppressWarnings("deprecation")
+	private void triggerRandomSurvey(int startH, int startM){
+    	if (!getStatus()){
+    		//first cancel the old setting before apply the new settings.
+    		CancelTask(rTask1);
+    		CancelTask(rTask2);
+    		CancelTask(rTask3);
+    		CancelTask(rTask4);
+    		CancelTask(rTask5);
+    		CancelTask(rTask6);
+    		PurgeTimers(t1);
+    		PurgeTimers(t2);
+    		PurgeTimers(t3);
+    		PurgeTimers(t4);
+    		PurgeTimers(t5);
+    		PurgeTimers(t6);
+    		//end of canceling part
+    		
+	    	int Interval=(((EndHour-startH)*60)+(EndMin-startM))/6;
+			int delay=Interval/2;
+			int Increment=Interval+delay;
+			int TriggerInterval=Interval-delay;
+			Log.d("wtest","random triggered");
+			
+			Date currentT = new Date();
+			Date dt1=new Date();				
+			dt1.setHours(startH);
+			dt1.setMinutes(startM+delay);
+			Date dt2=new Date();
+			dt2.setHours(startH);
+			dt2.setMinutes(startM+Increment);				
+			Date dt3=new Date();
+			dt3.setHours(startH);
+			dt3.setMinutes(startM+Increment+Interval);
+			Date dt4=new Date();
+			dt4.setHours(startM);
+			dt4.setMinutes(startM+Increment+(Interval*2));
+			Date dt5=new Date();
+			dt5.setHours(startH);
+			dt5.setMinutes(startM+Increment+(Interval*3));
+			Date dt6=new Date();
+			dt6.setHours(startH);
+			dt6.setMinutes(startM+Increment+(Interval*4));
+			/*
+			setRandomSchedule(t1,rTask1,dt1,currentT,TriggerInterval);
+			setRandomSchedule(t2,rTask2,dt2,currentT,TriggerInterval);
+			setRandomSchedule(t3,rTask3,dt3,currentT,TriggerInterval);
+			setRandomSchedule(t4,rTask4,dt4,currentT,TriggerInterval);
+			setRandomSchedule(t5,rTask5,dt5,currentT,TriggerInterval);
+			setRandomSchedule(t6,rTask6,dt6,currentT,TriggerInterval);
+			*/
+			if (dt1.after(currentT)){
+				rTask1 = new ScheduleSurvey(TriggerInterval,1);
+	    		t1.schedule(rTask1,dt1);
+	    	}
+			if (dt2.after(currentT)){
+				rTask2 = new ScheduleSurvey(TriggerInterval,2);
+	    		t2.schedule(rTask2,dt2);
+	    	}
+			if (dt3.after(currentT)){
+				rTask3 = new ScheduleSurvey(TriggerInterval,3);
+	    		t3.schedule(rTask3,dt3);
+	    	}
+			if (dt4.after(currentT)){
+				rTask4 = new ScheduleSurvey(TriggerInterval,4);
+	    		t4.schedule(rTask4,dt4);
+	    	}
+			if (dt5.after(currentT)){
+				rTask5 = new ScheduleSurvey(TriggerInterval,5);
+	    		t5.schedule(rTask5,dt5);
+	    	}
+			if (dt6.after(currentT)){
+				rTask6 = new ScheduleSurvey(TriggerInterval,6);
+	    		t6.schedule(rTask6,dt6);
+	    	}
+			setStatus(true);
+    	}
+    }
+    
+    /**
+     * @author Ricky
+     * @param t Timer
+     * @param rT TimerTask
+     * @param dt TriggerTimeMin
+     * @param currentT current Date
+     * @param TriggerInterval triggerInterval Time
+     */
+    private void setRandomSchedule(Timer t, TimerTask rT, Date dt, Date currentT,int TriggerInterval){
+    	if (dt.after(currentT)){
+    		rT = new ScheduleSurvey(TriggerInterval);
+    		t.schedule(rT,dt);
+    	}
+    }
+    
+    private void stopPartialService(){
+    	File f = new File(BASE_PATH,"SensorServiceEvents.txt");
+		Calendar cal=Calendar.getInstance();
+		try {
+			writeToFile(f,"Partially Destroyed at "+String.valueOf(cal.getTime()));
+		} catch (IOException e1) {
+			// TODO Auto-generated catch block
+			e1.printStackTrace();
+		}
+		
+    	if(affectivaRunnable != null){
+			affectivaRunnable.stop();
+			try {
+				bluetoothThread.join();
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
+		}
+		
+		if(equivitalThread != null){
+			equivitalThread.stop();
+		}
+				
+		//If canceled, it will have some problems. Need to be handled later.
+		mAlarmManager.cancel(scheduleSurvey);
+		//mAlarmManager.cancel(scheduleLocation);	
+		mLocationClient.disconnect();
+		activityRecognition.stopActivityRecognitionScan();
+		
+		if(Accelerometer != null){
+			Accelerometer.stop();
+		}
+		if(LightSensor != null){
+			LightSensor.stop();
+		}
+		
+		CancelTask(rTask1);
+		CancelTask(rTask2);
+		CancelTask(rTask3);
+		CancelTask(rTask4);
+		CancelTask(rTask5);
+		CancelTask(rTask6);
+		//CancelTask(midNightCheckTask);
+		//Ricky 3/14
+		PurgeTimers(t1);
+		PurgeTimers(t2);
+		PurgeTimers(t3);
+		PurgeTimers(t4);
+		PurgeTimers(t5);
+		PurgeTimers(t6);
+		//Ricky 3/14
+		//PurgeTimers(midNightCheckTimer);
+		Log.d(TAG,"Service Partially Stopped.");
+		
+		if(device!=null){
+		device.stop();
+		}
     }
  }
 

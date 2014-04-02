@@ -48,7 +48,7 @@ public class EquivitalRunnable implements Runnable, ISemDeviceSummaryEvents, ISe
 	private static SemDevice device;
 	String deviceAddress;
 	String deviceName;
-	String phoneAddress;
+	String phoneID;
 	public static final int CHEST_SENSOR_DATA = 109;
 	public static final int CHEST_SENSOR_ACCELEORMETER_DATA = 111;
 	public final static String BASE_PATH = "sdcard/TestResults/";
@@ -73,11 +73,11 @@ public class EquivitalRunnable implements Runnable, ISemDeviceSummaryEvents, ISe
 	//private int delaySecond = 10;
 	
 
-	public EquivitalRunnable(String address,String name,String macAddress)
+	public EquivitalRunnable(String address,String name,String ID)
 	{
 		deviceAddress=address;
 		deviceName=name;
-		phoneAddress=macAddress;
+		phoneID=ID;
 		SDKLicense sdk = SemDevice.getLicense();
 		sdk.applicationName = "Test Harness";
 		sdk.developerName = "Java Version";
@@ -245,7 +245,7 @@ public class EquivitalRunnable implements Runnable, ISemDeviceSummaryEvents, ISe
  	            String formattedData=data.replaceAll("[\\[\\]]","");
  	            //sendDatatoServer("chestsensor"+"."+phoneAddress+"."+deviceName+"."+dateObj,formattedData);
  	            TransmitData transmitData=new TransmitData();
- 	            transmitData.execute("chestsensor"+"."+phoneAddress+"."+deviceName+"."+dateObj,formattedData);
+ 	            transmitData.execute("chestsensor"+"."+phoneID+"."+deviceName+"."+dateObj,formattedData);
  	            //Log.d("Equivital","Chest Summary Data Point Sent");
  	            subList.clear();  
  	            subList=null;
@@ -282,7 +282,7 @@ public class EquivitalRunnable implements Runnable, ISemDeviceSummaryEvents, ISe
  	            String formattedData=data.replaceAll("[\\[\\]]","");
  	            //sendDatatoServer("chestsensor"+"."+phoneAddress+"."+deviceName+"."+dateObj,formattedData);
  	            TransmitData transmitData=new TransmitData();
- 	            transmitData.execute(fileName+"."+phoneAddress+"."+deviceName+"."+dateObj,formattedData);
+ 	            transmitData.execute(fileName+"."+phoneID+"."+deviceName+"."+dateObj,formattedData);
  	            Log.d("Equivital","AVG Accelerometer Data Point Sent");
  	            subList.clear();  
  	            subList=null;
@@ -360,7 +360,7 @@ public class EquivitalRunnable implements Runnable, ISemDeviceSummaryEvents, ISe
 		}
 	}
 	
-	/*
+	/**
 	 * @author Ricky 2/6
 	 * Funtion to apply the median filter.
 	 * @param compressedAVGChestSensorAccelerometerData: Avg value of 1 second data
@@ -408,8 +408,8 @@ public class EquivitalRunnable implements Runnable, ISemDeviceSummaryEvents, ISe
 	         String dataToSend=strings[1];
 	         if(checkDataConnectivity())
 	 		{
-	         //HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Crt/writeArrayToFile.php");
-	         HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Test/writeArrayToFile.php");
+	         HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Crt/writeArrayToFile.php");
+	         //HttpPost request = new HttpPost("http://dslsrv8.cs.missouri.edu/~rs79c/Server/Test/writeArrayToFile.php");
 	         List<NameValuePair> params = new ArrayList<NameValuePair>();
 	         //file_name 
 	         params.add(new BasicNameValuePair("file_name",fileName));        

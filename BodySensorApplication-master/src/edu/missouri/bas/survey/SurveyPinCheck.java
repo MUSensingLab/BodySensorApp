@@ -12,6 +12,7 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.media.MediaPlayer;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Vibrator;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -25,16 +26,19 @@ import edu.missouri.bas.service.SensorService;
 
 public class SurveyPinCheck extends Activity {
 	
-	private ProgressDialog mydialog;
 	private TextView mText;
 	private EditText mEdit;
 	private Button pButton;
 	private Button bButton;
 	private String surveyName;
 	private String surveyFile;
-	
 	private MediaPlayer mp;
-    
+	// Ricky 3/6/14
+	// define a dialog for future force close
+	private AlertDialog diaLog;
+	//Ricky 4/1/14
+	private int randomSeq;
+	
     
 
     private class StartSound extends TimerTask {
@@ -51,6 +55,7 @@ public class SurveyPinCheck extends Activity {
 		public void run() {
 			// TODO Auto-generated method stub
 			Log.d("PINAlarm","Final ALarm");
+			diaLog.cancel();
 			finish();
 			this.cancel();
 			
@@ -64,8 +69,10 @@ public class SurveyPinCheck extends Activity {
 		super.onCreate(savedInstanceState);
 		setContentView(R.layout.survey_pincheck);
 		//call pin-Dialog function
-		createPinAlertDialog();	     
-	    	     
+		createPinAlertDialog();	   
+		
+		
+		
 	    bButton = (Button)findViewById(R.id.button_exit);
 	    pButton = (Button)findViewById(R.id.button_pin);
 	    
@@ -97,18 +104,20 @@ public class SurveyPinCheck extends Activity {
 		// Alarm when the following two kind of survey is triggered
 		if(surveyName.equalsIgnoreCase("RANDOM_ASSESSMENT") && surveyFile.equalsIgnoreCase("RandomAssessmentParcel.xml"))
 		{
+			randomSeq = getIntent().getIntExtra("random_sequence", 0);
 			Timer t=new Timer();
 			t.schedule(new  StartSound(),1000*5);			
 			Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 	        v.vibrate(1000);
 		}
 		//ADD VOICE AND VIBRATE CONTROL TO THE MORNING REPORT
-		if(surveyName.equalsIgnoreCase("MORNING_REPORT") && surveyFile.equalsIgnoreCase("MorningReportParcel.xml"))
+		if(surveyName.equalsIgnoreCase("MORNING_REPORT_ALARM") && surveyFile.equalsIgnoreCase("MorningReportParcel.xml"))
 		{	
 			Timer t=new Timer();
 			t.schedule(new  StartSound(),1000*5);			
 			Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 	        v.vibrate(1000);
+	        surveyName = "MORNING_REPORT";
 		}
 		//ADD VOICE AND VIBRATE CONTROL TO THE DRINKFOLLOWUP
 		if(surveyName.equalsIgnoreCase("DRINKING_FOLLOWUP") && surveyFile.equalsIgnoreCase("DrinkingFollowup.xml"))
@@ -140,7 +149,7 @@ public class SurveyPinCheck extends Activity {
 		});
 	    
 	}
-	
+
 	public void onBackPressed(){
 		    new AlertDialog.Builder(this)
 		        .setTitle("Are you sure you want to exit?")
@@ -160,9 +169,9 @@ public class SurveyPinCheck extends Activity {
 	private void createPinAlertDialog(){
 		LayoutInflater factory=LayoutInflater.from(SurveyPinCheck.this);  
 	    //get view from my settings pin_number
-	    final View DialogView=factory.inflate(R.layout.pin_number, null);  
-		new AlertDialog.Builder(SurveyPinCheck.this)
-	    .setTitle("Checking identity")  
+	    final View DialogView=factory.inflate(R.layout.pin_number, null); 
+	    AlertDialog.Builder alertDialogBuilder  =new AlertDialog.Builder(SurveyPinCheck.this);
+	    alertDialogBuilder.setTitle("Checking identity")  
 	    .setCancelable(false)
 	    .setView(DialogView)//using user defined view
 	    .setPositiveButton(android.R.string.yes,   
@@ -172,14 +181,17 @@ public class SurveyPinCheck extends Activity {
 			        	mEdit = (EditText)DialogView.findViewById(R.id.edit_pin);
 			        	mText = (TextView)DialogView.findViewById(R.id.text_pin);
 			        	String pin = mEdit.getText().toString();
-			        	if (pin.equals("1234")){
+			        	if (pin.equals(SensorService.getPWD())){
 			        	//Send the intent and trigger new Survey Activity....
 			        	dialog.cancel();
 		        		Intent launchSurvey = 
 								new Intent(getApplicationContext(), XMLSurveyActivity.class);
 						launchSurvey.putExtra("survey_file", surveyFile);
 						launchSurvey.putExtra("survey_name", surveyName);
+						if (surveyName.equalsIgnoreCase("RANDOM_ASSESSMENT"))
+							launchSurvey.putExtra("random_sequence", randomSeq);
 						startActivity(launchSurvey);
+						finish();
 			        	}
 			        	else {
 			        		//New AlertDialog to show instruction.
@@ -189,7 +201,7 @@ public class SurveyPinCheck extends Activity {
 			        		.setPositiveButton("OK", null)
 			        		.create().show();
 			        	}			        	
-			        	dialog.cancel();
+			        	dialog.cancel(); 
 			        }  
 	    })
 	    .setNegativeButton(android.R.string.no, 
@@ -201,8 +213,9 @@ public class SurveyPinCheck extends Activity {
 				dialog.cancel();
 			}
 	    }
-	    		)
-	    .create().show();
+	    		);
+	    diaLog = alertDialogBuilder.create();
+	    diaLog.show();
 	}
 	
 	// ProgressDialog designed to show better UI. Not used now.
@@ -227,22 +240,30 @@ public class SurveyPinCheck extends Activity {
         }.start();
 	}
 	*/
-	 private static void cancelAllTimerTask()
+	private void cancelAllTimerTask()
+	{	
+		if(SensorService.alarmTimer!=null)
 		{
-			if(SensorService.alarmTimer!=null)
-			{	
-				//Boolean rickytest = alarmTask1.cancel();
-				SensorService.alarmTask1.cancel();
-				SensorService.alarmTask2.cancel();
-				SensorService.alarmTask3.cancel();
-				SensorService.alarmTask4.cancel();
-				SensorService.alarmTimer.purge();
-				//Log.d(TAG, rickytest.toString());
-				//alarmTimer.cancel();
-			}
-		}	
-	  protected void onDestroy(){
-	    	cancelAllTimerTask();
-	    	super.onDestroy();
-	    }
+	    	CancelTask(SensorService.alarmTask1);
+			CancelTask(SensorService.alarmTask2);
+			CancelTask(SensorService.alarmTask3);
+			CancelTask(SensorService.alarmTask4);
+			PurgeTimers(SensorService.alarmTimer);
+		}		
+	}
+	public void CancelTask(TimerTask tTask){
+		if  (tTask!=null)
+		tTask.cancel();
+	}
+	public void PurgeTimers(Timer t)
+	{
+		if(t!=null)
+		{
+		t.purge();	
+		}
+	}
+	protected void onDestroy(){
+    	//cancelAllTimerTask();
+    	super.onDestroy();
+    }
 }

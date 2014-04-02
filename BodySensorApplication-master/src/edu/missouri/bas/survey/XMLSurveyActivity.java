@@ -96,7 +96,9 @@ public class XMLSurveyActivity extends Activity {
         
     String surveyName;
     String surveyFile;
-    
+  //Ricky 4/1/14
+  	private int randomSeq;
+  	
     private static final String TAG = "XMLSurveyActivity";
     /*
      * Putting a serializable in an intent seems to default to the class
@@ -357,6 +359,11 @@ public class XMLSurveyActivity extends Activity {
     	surveyResultsIntent.putExtra(INTENT_EXTRA_SURVEY_NAME, surveyName);
     	surveyResultsIntent.putExtra(INTENT_EXTRA_SURVEY_RESULTS, answerMap);
     	surveyResultsIntent.putExtra(INTENT_EXTRA_COMPLETION_TIME, System.currentTimeMillis());
+    	if (surveyName.equalsIgnoreCase("RANDOM_ASSESSMENT")){
+    		randomSeq = getIntent().getIntExtra("random_sequence", 0);
+    		surveyResultsIntent.putExtra("random_sequence",randomSeq);
+    		Log.d("wtest","random's seq in SurveyActivity: "+randomSeq);
+    	}
     	this.sendBroadcast(surveyResultsIntent);    	
     	//Alert user
     	Toast.makeText(this, "Survey Complete.", Toast.LENGTH_LONG).show();
@@ -372,21 +379,28 @@ public class XMLSurveyActivity extends Activity {
     	finish();
     }
     
-    public static void cancelAllTimerTask()
-	{
-		if(SensorService.alarmTimer!=null)
-		{	
-			//Boolean rickytest = alarmTask1.cancel();
-			SensorService.alarmTask1.cancel();
-			SensorService.alarmTask2.cancel();
-			SensorService.alarmTask3.cancel();
-			SensorService.alarmTask4.cancel();
-			SensorService.alarmTimer.purge();
-			//Log.d(TAG, rickytest.toString());
-			//alarmTimer.cancel();
+    public  void cancelAllTimerTask()
+	{	
+    	if(SensorService.alarmTimer!=null)
+		{
+	    	CancelTask(SensorService.alarmTask1);
+			CancelTask(SensorService.alarmTask2);
+			CancelTask(SensorService.alarmTask3);
+			CancelTask(SensorService.alarmTask4);
+			PurgeTimers(SensorService.alarmTimer);
 		}
 	}	
-    
+    public void CancelTask(TimerTask tTask){
+		if  (tTask!=null)
+		tTask.cancel();
+	}
+	public void PurgeTimers(Timer t)
+	{
+		if(t!=null)
+		{
+		t.purge();	
+		}
+	}
     //Get the next question to be displayed
     protected LinearLayout nextQuestion(){
     	SurveyQuestion temp = null;

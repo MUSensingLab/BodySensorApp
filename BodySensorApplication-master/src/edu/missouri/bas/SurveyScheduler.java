@@ -30,7 +30,7 @@ public class SurveyScheduler extends Activity {
 	//Ricky 2/10
 	//public int EndHours;
 	//public int EndMinutes;
-	private boolean mIsRunning=false;
+	
 	//private static final String USER_PATH = "sdcard/BSAUserData/";
 	
 	public Context ctx = SurveyScheduler.this;
@@ -91,15 +91,16 @@ public class SurveyScheduler extends Activity {
 					editor.putString(SensorService.BED_TIME_INFO, timeToWrite);
 					editor.putString(SensorService.BED_HOUR_INFO, hourToWrite);
 					editor.putString(SensorService.BED_MIN_INFO, minuateToWrite);
+					//editor.putBoolean("MornReportDone", false);
 					editor.commit();
 					//Log.d(BED_TIME, bedTime.getString(BED_TIME_INFO, "none"));
-					//If current time is before 3 A.M, set the alarm Day to be the current Day.
-					
 					//Send Broadcast. And SensorService will handle it in the onReceive function.
 					Intent startScheduler = new Intent(SensorService.ACTION_SCHEDULE_MORNING);
 					getApplicationContext().sendBroadcast(startScheduler);
+					
 					Intent i=new Intent(getApplicationContext(), SurveyStatus.class);
 					startActivity(i);
+					finish();
 				} 
 				else {
 					Toast.makeText(getApplicationContext(),"Start Time must be earlier than 12:00 P.M.",Toast.LENGTH_LONG).show();
@@ -189,8 +190,9 @@ public class SurveyScheduler extends Activity {
 					    		startScheduler.putExtra(SensorService.END_MIN,EndMinutes);
 								getApplicationContext().sendBroadcast(startScheduler);
 								Toast.makeText(getApplicationContext(),"Message sent to the service",Toast.LENGTH_LONG).show();								
-								Intent i=new Intent(getApplicationContext(), SurveyStatus.class);
-								startActivity(i);
+								//Intent i=new Intent(getApplicationContext(), SurveyStatus.class);
+								//startActivity(i);
+								finish();
 					    		
 					    		
 					 }
@@ -211,9 +213,9 @@ public class SurveyScheduler extends Activity {
 		    		startDrinkScheduler.putExtra(SensorService.END_MIN,EndMinutes);
 		    		getApplicationContext().sendBroadcast(startDrinkScheduler);
 					Toast.makeText(getApplicationContext(),"Message sent to the service",Toast.LENGTH_LONG).show();					
-					Intent i=new Intent(getApplicationContext(), SurveyStatus.class);
-					startActivity(i);
-			   }			     	
+					//Intent i=new Intent(getApplicationContext(), SurveyStatus.class);
+					//startActivity(i);
+					finish();
 			 */
 			}
         });
