@@ -7,12 +7,17 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
+import java.math.BigInteger;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.KeyFactory;
+import java.security.PublicKey;
+import java.security.spec.RSAPublicKeySpec;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
-import java.util.Date;
 import java.util.List;
 
 import org.apache.http.HttpResponse;
@@ -76,6 +81,7 @@ public class MainActivity extends ListActivity {
 	protected static final int SURVEY = 2;	
 	protected static final int CONNECTIONS = 3;
 	protected static final int BED_STATUS = 4;
+	protected static final int SUSPENSION = 5;
 	public  final MainActivity thisActivity = this;
 	//private final static String urlServer = "http://babbage.cs.missouri.edu/~rs79c/Android/upload.php";
 	HttpURLConnection connection = null;
@@ -117,7 +123,7 @@ public class MainActivity extends ListActivity {
 	Editor editor;
 	String ID;
 	String PWD;
-	
+	public static PublicKey pubk = null;
 
 	//action URL
 	
@@ -130,14 +136,21 @@ public class MainActivity extends ListActivity {
         StrictMode.setThreadPolicy(policy);
        
         Log.d(TAG2, "OnCreate~~~~~~~~~~~~~~~~~~~");
-        
+        try {
+			pubk = getPublicKey();
+		} catch (Exception e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
     	String[] options = {"Start Service", "Stop Service", "Survey Menu",
-		"External Sensor Connections","Bed Report"};
+		"External Sensor Connections","Bed Report","Suspension"};
     	
-    	ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
-    			android.R.layout.simple_list_item_1, options);
+    	ArrayList<String> buttons = new ArrayList<String>();
+    	buttons.addAll(Arrays.asList(options));
+    	SensorService.adapter = new ArrayAdapter<String>(this,
+    			android.R.layout.simple_list_item_1, buttons);
     	
-    	setListAdapter(adapter);    
+    	setListAdapter(SensorService.adapter);    
         ListView listView = getListView();        
         listView.setOnItemClickListener(new OnItemClickListener() {
 
@@ -147,27 +160,52 @@ public class MainActivity extends ListActivity {
 					int position, long id) {
 		    	switch(position){
 	    		case START:
-	    			startSService();
+	    			if (SensorService.suspendFlag) {
+		    			SuspensionHint();
+	    			} else
+		    			startSService();
 	    			break;
 	    		case STOP:
-	    			stopSService();
+	    			if (SensorService.suspendFlag)
+	    				SuspensionHint();
+	    			else {
+	    				stopSService();
+	    				finish();
+	    			}
 	    			//uploadFiles(urlServer,chestsensorFilePath);	    			
 	    			//Toast.makeText(getApplicationContext(), "Successfully uploaded files.", Toast.LENGTH_LONG).show();
 	    			break;
-	    		case SURVEY: 
-	    			startSurveyMenu();
+	    		case SURVEY:
+	    			if (SensorService.suspendFlag)
+	    				SuspensionHint();
+	    			else
+	    				startSurveyMenu();
 	    			break;	    		
 	    		case CONNECTIONS:
-	    			startConnections();	    			
+	    			if (SensorService.suspendFlag)
+	    				SuspensionHint();
+	    			else
+	    				startConnections();	    			
 	    			break;
 	    		case BED_STATUS:
-	    			Calendar cTime = Calendar.getInstance();
-	    			int cHour = cTime.get(Calendar.HOUR_OF_DAY);
-	    			if (cHour>=21 || cHour<3){
-	    			//if (cHour!=0){
-	    				createPinAlertDialog();
+	    			if (SensorService.suspendFlag)
+	    				SuspensionHint();
+	    			else {
+		    			Calendar cTime = Calendar.getInstance();
+		    			int cHour = cTime.get(Calendar.HOUR_OF_DAY);
+		    			if (cHour>=21 || cHour<3){
+		    			//if (cHour!=0){
+		    				createPinAlertDialog();
+		    			} else {
+		    				bedTimeCheckDialog();
+		    			}
+	    			}
+	    			break;
+	    		case SUSPENSION:
+	    			if (!SensorService.suspendFlag) {
+	    				SuspensionCheck();
 	    			} else {
-	    				bedTimeCheckDialog();
+	    				breakSuspensionCheck();
 	    			}
 	    			break;
 		    	}
@@ -311,7 +349,21 @@ public class MainActivity extends ListActivity {
         return builder.create();  
     }
     
-    
+	private PublicKey getPublicKey() throws Exception {
+		// TODO Auto-generated method stub
+        InputStream is = getResources().openRawResource(R.raw.publickey);
+		ObjectInputStream ois = new ObjectInputStream(is);
+
+		BigInteger m = (BigInteger)ois.readObject();
+		BigInteger e = (BigInteger)ois.readObject();
+	    RSAPublicKeySpec keySpec = new RSAPublicKeySpec(m, e);
+		
+	   
+	    KeyFactory fact = KeyFactory.getInstance("RSA", "BC");
+	    PublicKey pubKey = fact.generatePublic(keySpec);
+	    
+		return pubKey; 
+	}
 	
     private void uploadFiles(String urlServer,String Path) {
 		// TODO Auto-generated method stub
@@ -509,41 +561,57 @@ public class MainActivity extends ListActivity {
 	@Override
 	public boolean onOptionsItemSelected(MenuItem item){
 		if(item.getItemId() == R.id.Connect){
-			if(mAdapter.isEnabled())
-			{			
-			Intent serverIntent = new Intent(this, DeviceListActivity.class);
-            startActivityForResult(serverIntent, MainActivity.INTENT_SELECT_DEVICES);
-            return true;
-            }
-			else
-			{			    
-				Toast.makeText(getApplicationContext(),"Enable BT before connecting",Toast.LENGTH_LONG).show();			
-			}					
+			if (SensorService.suspendFlag)
+				SuspensionHint();
+			else {
+				if(mAdapter.isEnabled())
+				{			
+				Intent serverIntent = new Intent(this, DeviceListActivity.class);
+	            startActivityForResult(serverIntent, MainActivity.INTENT_SELECT_DEVICES);
+	            return true;
+	            }
+				else
+				{			    
+					Toast.makeText(getApplicationContext(),"Enable BT before connecting",Toast.LENGTH_LONG).show();			
+				}
+			}
 		}
 		
 		else if (item.getItemId() == R.id.Enable){
-			if(mAdapter.isEnabled())
-			{
-				Toast.makeText(getApplicationContext(),"Bluetooth is already enabled ",Toast.LENGTH_LONG).show();
+			if (SensorService.suspendFlag)
+				SuspensionHint();
+			else {
+				if(mAdapter.isEnabled())
+				{
+					Toast.makeText(getApplicationContext(),"Bluetooth is already enabled ",Toast.LENGTH_LONG).show();
+					
+				}
+				else
+				{
+					
+					turnOnBt();				
+				}
 				
+	            return true;
 			}
-			else
-			{
-				
-				turnOnBt();				
-			}
-			
-            return true;
 		}
 		
 		else if (item.getItemId() == R.id.Disable){
-			mAdapter.disable();
-			Toast.makeText(getApplicationContext(),"Bluetooth is disabled",Toast.LENGTH_LONG).show();			
-            return true;
+			if (SensorService.suspendFlag)
+				SuspensionHint();
+			else {
+				mAdapter.disable();
+				Toast.makeText(getApplicationContext(),"Bluetooth is disabled",Toast.LENGTH_LONG).show();			
+	            return true;
+			}
 		}
 		else if(item.getItemId() == R.id.manage){
-			Intent serverIntent = new Intent(this, AdminManageActivity.class);
-            startActivityForResult(serverIntent, MainActivity.INTENT_REQUEST_MAMAGE);
+			if (SensorService.suspendFlag)
+				SuspensionHint();
+			else {
+				Intent serverIntent = new Intent(this, AdminManageActivity.class);
+	            startActivityForResult(serverIntent, MainActivity.INTENT_REQUEST_MAMAGE);
+			}
 		}
 		else 
 			return false;
@@ -645,6 +713,85 @@ public class MainActivity extends ListActivity {
 			        	}
 	    })
 	    .create().show();
+	}
+	
+	private void SuspensionHint(){		
+		new AlertDialog.Builder(MainActivity.this)
+	    .setTitle("The App is in suspension state.")
+	    .setMessage("You should break suspension first before you click this button.")
+	    .setCancelable(false)
+	    .setPositiveButton(android.R.string.yes,   
+	    		new DialogInterface.OnClickListener() {		          
+			        @Override  
+			        public void onClick(DialogInterface dialog, int which) { 
+			        	dialog.cancel();
+			        	}
+	    })
+	    .create().show();
+	}
+	
+	private void SuspensionCheck(){
+	    new AlertDialog.Builder(this)
+	        .setTitle("Are you sure to do the suspension?")
+	        .setCancelable(false)
+	        .setPositiveButton(android.R.string.yes, new android.content.DialogInterface.OnClickListener() {
+
+	            public void onClick(DialogInterface arg0, int arg1) {
+	    			arg0.cancel();
+	    			Intent i=new Intent(getApplicationContext(), SuspesionTimePicker.class);
+					startActivity(i);	            	
+	            }
+	        })
+	        .setNegativeButton(android.R.string.no, new android.content.DialogInterface.OnClickListener(){
+
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					// TODO Auto-generated method stub
+					dialog.cancel();
+				}
+	        	
+	        })
+	        .create().show();
+	
+	return;
+	}
+	
+	private void breakSuspensionCheck(){
+	    new AlertDialog.Builder(this)
+	        .setTitle("Are you sure to break the suspension?")
+	        .setCancelable(false)
+	        .setPositiveButton(android.R.string.yes, new android.content.DialogInterface.OnClickListener() {
+
+	            public void onClick(DialogInterface arg0, int arg1) {
+	    			Intent breakSuspension = new Intent(SensorService.INTENT_BREAK_SUSPENSION);
+					getApplicationContext().sendBroadcast(breakSuspension);
+	    			arg0.cancel();
+	            }
+	        })
+	        .setNegativeButton(android.R.string.no, new android.content.DialogInterface.OnClickListener(){
+
+				@Override
+				public void onClick(DialogInterface dialog, int which) {
+					dialog.cancel();
+				}
+	        	
+	        })
+	        .create().show();
+	
+	return;
+	}
+	
+	public void onBackPressed(){
+		    new AlertDialog.Builder(this)		        
+		        .setTitle("The Back Button is disabled.")
+		        .setMessage("The back button will terminate the program.")
+		        .setCancelable(false)
+		        .setPositiveButton(android.R.string.yes, new android.content.DialogInterface.OnClickListener() {
+		            public void onClick(DialogInterface arg0, int arg1) {
+		            	arg0.cancel();
+		            }
+		        }).create().show();		
+		return;
 	}
 }
 
